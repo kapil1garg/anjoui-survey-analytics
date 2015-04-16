@@ -1,0 +1,232 @@
+---
+title: "homie-survey-analysis"
+author: "Kapil Arun Garg"
+date: "April 12, 2015"
+output: html_document
+---
+
+This document highlights 
+
+Load Libraries and necessary functons
+```{r Libraries and Functions, echo = FALSE}
+library(data.table)
+library(lubridate)
+library(reshape2)
+library(ggplot2)
+library(grid)
+library(dplyr)
+library(TTR)
+library(scales)
+options(digits = 15)
+options(scipen = 100)
+
+###Functions###
+
+##SOURCED FROM COOKBOOK FOR R: http://www.cookbook-r.com/Graphs/Multiple_graphs_on_one_page_%28ggplot2%29/ ##
+Multiplot <- function(..., plotlist = NULL, file, cols = 1, layout = NULL)
+  {
+  require(grid)
+  
+  plots <- c(list(...), plotlist)
+  
+  numPlots = length(plots)
+  
+  if (is.null(layout)) {
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                     ncol = cols, nrow = ceiling(numPlots/cols))
+    }
+  
+  if (numPlots == 1) {
+    print(plots[[1]])
+    
+    } else {
+      grid.newpage()
+      pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+      
+      for (i in 1:numPlots) {
+        matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+        
+        print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                        layout.pos.col = matchidx$col))
+        }
+      }
+  }
+
+##SOURCED FROM: http://rpubs.com/kohske/dual_axis_in_ggplot2 ##
+MultipleAxes <- function(plot1, plot2)
+  {
+  # extract gtable but create the plots first
+  g1 <- ggplot_gtable(ggplot_build(plot1))
+  g2 <- ggplot_gtable(ggplot_build(plot2))
+  
+  # overlap the panel of 2nd plot on that of 1st plot
+  pp <- c(subset(g1$layout, name == "panel", se = t:r))
+  g <- gtable_add_grob(g1, g2$grobs[[which(g2$layout$name == "panel")]], pp$t, pp$l, pp$b, pp$l)
+  
+  # axis tweaks
+  ia <- which(g2$layout$name == "axis-l")
+  ga <- g2$grobs[[ia]]
+  ax <- ga$children[[2]]
+  ax$widths <- rev(ax$widths)
+  ax$grobs <- rev(ax$grobs)
+  ax$grobs[[1]]$x <- ax$grobs[[1]]$x - unit(1, "npc") + unit(0.15, "cm")
+  g <- gtable_add_cols(g, g2$widths[g2$layout[ia, ]$l], length(g$widths) - 1)
+  g <- gtable_add_grob(g, ax, pp$t, length(g$widths) - 1, pp$b)
+  
+  # add y axis label on right
+  ia2 <- which(g2$layout$name == "ylab")
+  ga2 <- g2$grobs[[ia2]]
+  ga2$rot <- -90
+  g <- gtable_add_cols(g, g2$widths[g2$layout[ia2, ]$l], length(g$widths) - 1)
+  g <- gtable_add_grob(g, ga2, pp$t, length(g$widths) - 1, pp$b)
+  
+  #Draw graph
+  #grid.draw(g)
+  return(g)
+  }
+
+#Function to align ggplot objects 
+##SOURCED FROM baptiste: http://stackoverflow.com/questions/13294952/left-align-two-graph-edges-ggplot/13295880#13295880 ##
+RbindGtableMax <- function(...){
+  gtl <- list(...)
+  stopifnot(all(sapply(gtl, is.gtable)))
+  Bind2 <- function (x, y) 
+    {
+    stopifnot(ncol(x) == ncol(y))
+    if (nrow(x) == 0) 
+      return(y)
+    if (nrow(y) == 0) 
+      return(x)
+    y$layout$t <- y$layout$t + nrow(x)
+    y$layout$b <- y$layout$b + nrow(x)
+    x$layout <- rbind(x$layout, y$layout)
+    x$heights <- gtable:::insert.unit(x$heights, y$heights)
+    x$rownames <- c(x$rownames, y$rownames)
+    x$widths <- grid::unit.pmax(x$widths, y$widths)
+    x$grobs <- append(x$grobs, y$grobs)
+    x
+    }
+  
+  Reduce(Bind2, gtl)
+  }
+
+CbindGtableMax <- function(...){
+  gtl <- list(...)
+  stopifnot(all(sapply(gtl, is.gtable)))
+  Bind2 <- function (x, y) 
+    {
+    stopifnot(nrow(x) == nrow(y))
+    if (ncol(x) == 0) 
+      return(y)
+    if (ncol(y) == 0) 
+      return(x)
+    y$layout$l <- y$layout$l + ncol(x)
+    y$layout$r <- y$layout$r + ncol(x)
+    x$layout <- rbind(x$layout, y$layout)
+    x$widths <- gtable:::insert.unit(x$widths, y$widths)
+    x$colnames <- c(x$colnames, y$colnames)
+    x$heights <- grid::unit.pmax(x$heights, y$heights)
+    x$grobs <- append(x$grobs, y$grobs)
+    x
+    }
+  Reduce(Bind2, gtl)
+  }
+
+#Custom tranformation for an nth-root axis
+NthrootTrans <- function(base = 2)
+  {
+  trans <- function(x) x^(1/base)
+  inv <- function(x) x^base
+  trans_new(paste0("nthroot", format(base)), trans, inv, domain = c(0, Inf))
+  }
+
+#Rescale data to lower and upper values (default: 0-1) scale based on data sets min and max
+CustomRange <- function(x, lower = 0, upper = 1)
+  {
+  return(((x - min(x)) * ((upper - lower)/(max(x)-min(x))) + lower))
+  }
+
+#Calculate the percentile ranks for each entry in a vector
+##SOURCED FROM chi: http://stats.stackexchange.com/questions/11924/computing-percentile-rank-in-r ##
+perc.rank <- function(x) trunc(rank(x))/length(x)
+
+## Functions to compute difference in months, SOURCED FROM: http://stackoverflow.com/questions/1995933/number-of-months-between-two-dates
+monnb <- function(d) { 
+  lt <- as.POSIXlt(as.Date(d, origin="1900-01-01"))
+  lt$year*12 + lt$mon
+  } 
+# compute a month difference as a difference between two monnb's
+mondf <- function(d1, d2) { monnb(d2) - monnb(d1) }
+``` 
+
+Load Data
+```{r Load Data}
+# Import raw dal data
+raw.data <- fread("data.csv", header = T, verbose = T, sep = ",")
+```
+
+Parse column names and numbers into separate table. Then apply to data to clean it. 
+```{r Clean Data}
+question.list <- c("ResponseID", "ResponseSet", "Name", "ExternalDataReference", "EmailAddress", "IPAddress", "Status", "StartDate", "EndDate", "Finished", 
+                   "How often did you cook for dinner in the last quarter?", "Why don't you cook more often? Lack of time", "Why don't you cook more often? Lack of skill",
+                   "Why don't you cook more often? Lack of interest", "Why don't you cook more often? I like to cook but hate to eat alone", "Why don't you cook more often? Lack of equipment",
+                   "Why don't you cook more often? The grocery store is too far", "Where did you have dinner normally when not cooking? Restaurants or cafe", 
+                   "Where did you have dinner normally when not cooking? Snacks", "Where did you have dinner normally when not cooking? At friends",
+                   "Where did you have dinner normally when not cooking? Skip the dinner", "Where did you have dinner normally when not cooking? Other solution",
+                   "Where did you have dinner normally when not cooking? I have someone (significant other / wife / husband) who cooks for me",
+                   "How much on average did you spend on dinner if not cooking (including tips)? USD $", "How much are your willing to pay for a dinner on a daily manner? USD $",
+                   "How often do you eat alone for dinner?", "Do you enjoy eating alone?", "How would you describe your feeling when you are invited to a dinner by a member of NU community?",
+                   "Normally how many people do you cook for?", "Which of the following statements best describes you when you cook?", "How would you rate your cooking skill?",
+                   "How long does it take you to cook a meal?", "How often do you go for grocery shopping?", "Normally", "how much is your grocery bill each shopping routine? USD $",
+                   "How much do you enjoy hosting dinner?", "What do you use to search for food? Webpage (Desktop or Laptop)", "What do you use to search for food? iPhone",
+                   "What do you use to search for food? Android Phone", "What do you use to search for food? Tablet", "What do you use to search for food? Others please specify",
+                   "What do you use to search for food? Others please specify below TEXT", "How do you order it? iPhone App", "How do you order it? Android Phone App",
+                   "How do you order it? Others please specify below", "How do you order it? Others please specify below TEXT", "How do you order it? Webpage (Desktop or Laptop)",
+                   "How do you order it? Phone Call", "Gender", "Age Age year", "Working status:", "Living Status：", "Marriage Status:", "If you are a student of Northwestern University: Degree",
+                   "If you are a student of Northwestern University: School", "Email Address", "LocationLatitude", "LocationLongitude", "LocationAccuracy")
+column.numbers <- paste("V", seq(1:ncol(raw.data)), sep = "")
+question.number.table <- data.table(question = question.list, number = column.numbers)
+
+# Clean data
+setnames(raw.data, names(raw.data), column.numbers)
+data.cleaned <- raw.data[-1, ]
+
+# Remove unnecessary columns
+data.cleaned[, question.number.table[question %in% c("ResponseID", "ResponseSet", "Name", "ExternalDataReference", "EmailAddress", "IPAddress", "Status", "StartDate", "EndDate", "Finished",
+                                                     "LocationLatitude", "LocationLongitude", "LocationAccuracy"), number] := NULL, with = F]
+```
+
+Make histograms for how much spend and how much willing to spend
+```{r Spending Histograms}
+# Calculate histograms
+number.breaks <- seq(0, 100, 1)
+current.spending.hist <- cbind("spending_type" = "current_spending", as.data.table(hist(as.numeric(data.cleaned$V24), breaks = number.breaks, plot = F)[c("counts", "mids", "density")]))
+willing.spening.hist <- cbind("spending_type" = "willing_spending", as.data.table(hist(as.numeric(data.cleaned$V25), breaks = number.breaks, plot = F)[c("counts", "mids", "density")]))
+spending.hist <- rbind(current.spending.hist, willing.spening.hist)
+
+maxFreq <- 20
+ggplot(spending.hist, geom = "blank") +
+  geom_bar(aes(x = mids, y = counts), stat = "identity") + 
+  geom_text(data = spending.hist[counts > 0], aes(x = mids, y = counts, label = counts), vjust = -0.5, size = 7) + 
+  facet_grid(spending_type ~ . ) + 
+  scale_y_continuous(expand = c(0, 0),
+                     limits = c(0, maxFreq),
+                     breaks = seq(0, maxFreq, 1),
+                     label = seq(0, maxFreq, 1),
+                     oob = rescale_none)+
+  scale_x_continuous(expand = c(0, 0),
+                     limits = c(0, 100),
+                     breaks = seq(0, 100, 1),
+                     label = seq(0, 100, 1),
+                     oob = rescale_none) + 
+  xlab("Bin (USD $)") +
+  ylab("Frequency") +
+  ggtitle("Histogram of Current Average Spending on Dinner vs Average Willingness to Pay") +
+  guides(fill = guide_legend(order = 1, override.aes = list(size = 15), title = NULL),
+         color = guide_legend(order = 2, title = NULL))+
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5), axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5), axis.text.y = element_text(vjust = 0.25),
+        panel.grid.minor = element_line(color = "gray", size = 0.3), panel.grid.major = element_line(color = "gray", size = 0.3), panel.margin = unit(x = 0.12,  "inches"),
+        legend.box = "vertical", legend.box.just = "left", legend.position = "left", legend.key = element_blank(), legend.text = element_text(size = 20))
+```
+

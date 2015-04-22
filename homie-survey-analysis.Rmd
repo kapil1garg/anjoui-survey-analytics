@@ -251,3 +251,28 @@ spending.plot
 graphics.off()
 ```
 
+Calculate the average cost per meal
+```{r Average Meal Cost}
+# Select relevant attributes (number people, shopping frequency, average trip cost)
+data.meal.cost <- data.cleaned[, c("V11", "V29", "V33", "V34"), with = F]
+setnames(data.meal.cost, names(data.meal.cost), c("times_cooked_perweek", "number_people", "freq_shopping", "cost_shopping"))
+
+# Select only our "chefs"
+data.meal.cost <- data.meal.cost[times_cooked_perweek != "" & number_people != "" & freq_shopping != "" & cost_shopping != "", ]
+
+# Convert column type for easier math (assume worst case --> least people)
+data.meal.cost[, number_people := factor(number_people)]
+data.meal.cost[, number_people := plyr::mapvalues(data.meal.cost$number_people, c("Just for myself", "2-3 people", "4-5 people"), c("1", "2", "4"))]
+data.meal.cost[, times_cooked_perweek := factor(times_cooked_perweek)]
+data.meal.cost[, times_cooked_perweek := plyr::mapvalues(data.meal.cost$times_cooked_perweek, c("More than 4 Times a Week", "Everyday"), c("5", "7"))]
+
+data.meal.cost[, names(data.meal.cost) := lapply(data.meal.cost, FUN = function(x) {as.numeric(as.character(x))}), with = F]
+
+# Meals cooked = time frame (freq_shopping)/7 * times_cooked_perweek * number_people
+data.meal.cost[, meals_cooked := (freq_shopping/7) * times_cooked_perweek * number_people]
+data.meal.cost[, avg_meal_cost := cost_shopping/meals_cooked]
+
+# Print summary statistics
+summary(data.meal.cost$avg_meal_cost)
+```
+

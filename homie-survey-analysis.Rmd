@@ -163,6 +163,7 @@ Load Data
 ```{r Load Data}
 # Import raw dal data
 raw.data <- fread("data.csv", header = T, verbose = T, sep = ",")
+raw.data[, names(raw.data)[length(names(raw.data))] := NULL]
 ```
 
 Parse column names and numbers into separate table. Then apply to data to clean it. 
@@ -177,12 +178,12 @@ question.list <- c("ResponseID", "ResponseSet", "Name", "ExternalDataReference",
                    "How much on average did you spend on dinner if not cooking (including tips)? USD $", "How much are your willing to pay for a dinner on a daily manner? USD $",
                    "How often do you eat alone for dinner?", "Do you enjoy eating alone?", "How would you describe your feeling when you are invited to a dinner by a member of NU community?",
                    "Normally how many people do you cook for?", "Which of the following statements best describes you when you cook?", "How would you rate your cooking skill?",
-                   "How long does it take you to cook a meal?", "How often do you go for grocery shopping?", "Normally", "how much is your grocery bill each shopping routine? USD $",
+                   "How long does it take you to cook a meal?", "How often do you go for grocery shopping?", "Normally how much is your grocery bill each shopping routine? USD $",
                    "How much do you enjoy hosting dinner?", "What do you use to search for food? Webpage (Desktop or Laptop)", "What do you use to search for food? iPhone",
                    "What do you use to search for food? Android Phone", "What do you use to search for food? Tablet", "What do you use to search for food? Others please specify",
                    "What do you use to search for food? Others please specify below TEXT", "How do you order it? iPhone App", "How do you order it? Android Phone App",
                    "How do you order it? Others please specify below", "How do you order it? Others please specify below TEXT", "How do you order it? Webpage (Desktop or Laptop)",
-                   "How do you order it? Phone Call", "Gender", "Age Age year", "Working status:", "Living Status：", "Marriage Status:", "If you are a student of Northwestern University: Degree",
+                   "How do you order it? Phone Call", "Gender", "Age Age year", "Working status", "Living Status", "Marriage Status", "If you are a student of Northwestern University: Degree",
                    "If you are a student of Northwestern University: School", "Email Address", "LocationLatitude", "LocationLongitude", "LocationAccuracy")
 column.numbers <- paste("V", seq(1:ncol(raw.data)), sep = "")
 question.number.table <- data.table(question = question.list, number = column.numbers)
@@ -194,6 +195,12 @@ data.cleaned <- raw.data[-1, ]
 # Remove unnecessary columns
 data.cleaned[, question.number.table[question %in% c("ResponseID", "ResponseSet", "Name", "ExternalDataReference", "EmailAddress", "IPAddress", "Status", "StartDate", "EndDate", "Finished",
                                                      "LocationLatitude", "LocationLongitude", "LocationAccuracy"), number] := NULL, with = F]
+
+#Declare width, height output settings for pdf plot export
+pageSize <- c(8.5, 11) #width, height
+pHeight <- pageSize[1] * 2 #apply scaling factor of 2 so graph is less compressed
+pWidth <- pageSize[2] * 2 #apply scaling factor of 2 so graph is less compressed
+
 ```
 
 Make histograms for how much spend and how much willing to spend
@@ -204,29 +211,43 @@ current.spending.hist <- cbind("spending_type" = "current_spending", as.data.tab
 willing.spening.hist <- cbind("spending_type" = "willing_spending", as.data.table(hist(as.numeric(data.cleaned$V25), breaks = number.breaks, plot = F)[c("counts", "mids", "density")]))
 spending.hist <- rbind(current.spending.hist, willing.spening.hist)
 
-maxFreq <- 20
-ggplot(spending.hist, geom = "blank") +
-  geom_bar(aes(x = mids, y = counts), stat = "identity") + 
-  geom_text(data = spending.hist[counts > 0], aes(x = mids, y = counts, label = counts), vjust = -0.5, size = 7) + 
-  facet_grid(spending_type ~ . ) + 
-  scale_y_continuous(expand = c(0, 0),
-                     limits = c(0, maxFreq),
-                     breaks = seq(0, maxFreq, 1),
-                     label = seq(0, maxFreq, 1),
-                     oob = rescale_none)+
+spending.plot <- ggplot(data.cleaned, geom = "blank") +
+  geom_vline(x = mean(as.numeric(data.cleaned$V24), na.rm = T), color = "red") + 
+  geom_vline(x = median(as.numeric(data.cleaned$V24), na.rm = T), color = "red", linetype = "longdash") + 
+  geom_vline(x = mean(as.numeric(data.cleaned$V25), na.rm = T), color = "blue") + 
+  geom_vline(x = median(as.numeric(data.cleaned$V25), na.rm = T), color = "blue", linetype = "longdash") + 
+  geom_density(aes(x = as.numeric(V24), fill = "red"), alpha = 0.4) +
+  geom_density(aes(x = as.numeric(V25), fill = "blue"), alpha = 0.4) +
+  geom_vline(x = mean(as.numeric(data.cleaned$V24), na.rm = T), color = "red") + 
   scale_x_continuous(expand = c(0, 0),
                      limits = c(0, 100),
                      breaks = seq(0, 100, 1),
                      label = seq(0, 100, 1),
+                     oob = rescale_none) +
+  scale_y_continuous(expand = c(0, 0),
+                     limits = c(0, 0.15),
+                     breaks = seq(0, 0.15, 0.01),
+                     label = seq(0, 0.15, 0.01),
                      oob = rescale_none) + 
-  xlab("Bin (USD $)") +
-  ylab("Frequency") +
-  ggtitle("Histogram of Current Average Spending on Dinner vs Average Willingness to Pay") +
-  guides(fill = guide_legend(order = 1, override.aes = list(size = 15), title = NULL),
+  scale_fill_manual(breaks = c("blue", "red"),
+                    labels = c("blue" = "Average Willingness to Pay for Meal\nDashed Line = Median\nSolid Line = Mean",
+                               "red" = "Average Current Spending on Meal\nDashed Line = Median\nSolid Line = Mean"),
+                    values = c("blue" = "blue", "red" = "red")) +
+  xlab("USD $") +
+  ylab("Percentage of Total Survey") +
+  ggtitle("Density Plot of Average Current Spending vs Average Willingness to Pay on Meal") +
+  guides(fill = guide_legend(order = 1, override.aes = list(size = 15, colour = NULL), title = NULL),
          color = guide_legend(order = 2, title = NULL))+
   theme_bw()+
   theme(plot.title = element_text(hjust = 0.5), axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5), axis.text.y = element_text(vjust = 0.25),
         panel.grid.minor = element_line(color = "gray", size = 0.3), panel.grid.major = element_line(color = "gray", size = 0.3), panel.margin = unit(x = 0.12,  "inches"),
-        legend.box = "vertical", legend.box.just = "left", legend.position = "left", legend.key = element_blank(), legend.text = element_text(size = 20))
+        legend.box = "vertical", legend.box.just = "left", legend.position = "left", legend.key=element_rect(fill=NA), legend.text = element_text(size = 12))
+
+pdf(file = paste("./Graphs/",
+                 "survery_spending_plot",
+                 ".pdf", sep = ""),
+    width = pWidth, height = pHeight, compress = FALSE)
+spending.plot
+graphics.off()
 ```
 

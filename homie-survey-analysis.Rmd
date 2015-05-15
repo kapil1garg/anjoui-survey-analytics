@@ -211,6 +211,7 @@ current.spending.hist <- cbind("spending_type" = "current_spending", as.data.tab
 willing.spening.hist <- cbind("spending_type" = "willing_spending", as.data.table(hist(as.numeric(data.cleaned$V25), breaks = number.breaks, plot = F)[c("counts", "mids", "density")]))
 spending.hist <- rbind(current.spending.hist, willing.spening.hist)
 
+
 spending.plot <- ggplot(data.cleaned, geom = "blank") +
   geom_vline(x = mean(as.numeric(data.cleaned$V24), na.rm = T), color = "red") + 
   geom_vline(x = median(as.numeric(data.cleaned$V24), na.rm = T), color = "red", linetype = "longdash") + 
